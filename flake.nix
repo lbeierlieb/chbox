@@ -21,6 +21,10 @@
         name = "chbox";
         runtimeInputs = with pkgs; [
           cloud-hypervisor virtiofsd coreutils util-linux findutils gawk git e2fsprogs passt iproute2 nftables
+        ] ++ [
+          # For `claude setup-token` on first run. The guest's pkgs allows this
+          # unfree package, and it is the same store path as in the VM.
+          guest.pkgs.claude-code
         ];
         text = ''
           KERNEL=${cfg.boot.kernelPackages.kernel.dev}/vmlinux

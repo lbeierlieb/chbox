@@ -111,11 +111,25 @@ if [ -z "$token" ] && [ -r "$tokenfile" ]; then
   fi
   token=$(< "$tokenfile")
 fi
+# First run: create a long-lived token on the host and keep it for next time.
+if [ -z "$token" ] && [ -t 0 ]; then
+  # Ask first: setup-token's login screen is hard to back out of.
+  read -rp "chbox: no Claude token yet. Create one now with 'claude setup-token'? [Y/n] " answer
+  if [[ ! $answer =~ ^[Nn] ]] && claude setup-token; then
+    read -rsp "chbox: paste the token shown above (empty to skip): " token
+    echo >&2
+    if [ -n "$token" ]; then
+      mkdir -p "$(dirname "$tokenfile")"
+      (umask 077; printf '%s\n' "$token" > "$tokenfile")
+      echo "chbox: saved to $tokenfile" >&2
+    fi
+  fi
+fi
 if [ -n "$token" ]; then
   (umask 077; printf '%s\n' "$token" > "$rundir/guest/claude-token")
 else
-  echo "chbox: no Claude token, Claude will ask you to log in. To skip that, run" >&2
-  echo "       'claude setup-token' on the host and save the token to $tokenfile" >&2
+  echo "chbox: no Claude token, Claude will ask you to log in in the VM. To skip" >&2
+  echo "       that, save a 'claude setup-token' token to $tokenfile" >&2
   echo "       (or export CLAUDE_CODE_OAUTH_TOKEN)." >&2
 fi
 git config --get user.name > "$rundir/guest/git-name" || true
