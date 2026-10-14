@@ -1,4 +1,15 @@
 { config, lib, pkgs, modulesPath, ... }:
+let
+  # Home is a tmpfs, so these are copied fresh on every boot.
+  claudeJson = pkgs.writeText "claude.json" (builtins.toJSON {
+    hasCompletedOnboarding = true;
+    bypassPermissionsModeAccepted = true;
+    projects."/repo".hasTrustDialogAccepted = true;
+  });
+  claudeSettings = pkgs.writeText "claude-settings.json" (builtins.toJSON {
+    skipDangerousModePermissionPrompt = true;
+  });
+in
 {
   imports = [ (modulesPath + "/profiles/minimal.nix") ];
 
@@ -42,6 +53,12 @@
     device = "repo";
     fsType = "virtiofs";
   };
+  # Per-launch data from run.sh: claude-token, git-name, git-email.
+  fileSystems."/run/chbox" = {
+    device = "chbox";
+    fsType = "virtiofs";
+    options = [ "ro" ];
+  };
 
   # Static addressing on the tap that run.sh sets up; filtering happens there,
   # outside the VM.
@@ -71,16 +88,36 @@
   # The host passes its $TERM through, so ship terminfo for common terminals.
   environment.enableAllTerminfo = true;
 
-  environment.systemPackages = [ pkgs.git ];
+  nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "claude-code";
+  environment.systemPackages = [ pkgs.git pkgs.claude-code ];
+  # The store is read-only and the VM throwaway: updating in place can't work.
+  environment.variables.DISABLE_AUTOUPDATER = "1";
 
   programs.tmux = {
     enable = true;
     terminal = "tmux-256color";
+    extraConfig = "set -g focus-events on"; # Claude Code asks for it
   };
-  # Leaving tmux ends the login; getty logs in again. `sudo poweroff` exits the VM.
+  # On the console login: pick up the per-launch data, skip Claude's first-run
+  # prompts, and start tmux with Claude in the first pane (a shell once Claude
+  # exits). Leaving tmux ends the login; getty logs in again. `sudo poweroff`
+  # exits the VM.
   programs.bash.loginShellInit = ''
     if [ -z "''${TMUX-}" ] && [ "$(tty)" = /dev/hvc0 ]; then
-      exec tmux new-session -A -s main -c /repo
+      if [ -s /run/chbox/claude-token ]; then
+        export CLAUDE_CODE_OAUTH_TOKEN=$(< /run/chbox/claude-token)
+      fi
+      if [ -s /run/chbox/git-name ]; then
+        export GIT_AUTHOR_NAME=$(< /run/chbox/git-name) GIT_COMMITTER_NAME=$(< /run/chbox/git-name)
+      fi
+      if [ -s /run/chbox/git-email ]; then
+        export GIT_AUTHOR_EMAIL=$(< /run/chbox/git-email) GIT_COMMITTER_EMAIL=$(< /run/chbox/git-email)
+      fi
+      [ -e ~/.claude.json ] || install -m 600 ${claudeJson} ~/.claude.json
+      mkdir -p ~/.claude
+      [ -e ~/.claude/settings.json ] || install -m 600 ${claudeSettings} ~/.claude/settings.json
+      exec tmux new-session -A -s main -c /repo \
+        "claude --dangerously-skip-permissions; exec bash"
     fi
   '';
 

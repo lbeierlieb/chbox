@@ -47,13 +47,15 @@ table ip chbox {
 }
 NFT
 
-  exec cloud-hypervisor \
+  # Dies with pasta, so the VM never outlives the launcher.
+  exec setpriv --pdeathsig KILL cloud-hypervisor \
     --kernel "$KERNEL" \
     --initramfs "$INITRD" \
     --cmdline "$CHBOX_CMDLINE" \
     --cpus boot="$CPUS" \
     --memory size="$MEMORY",shared=on \
     --fs tag=nixstore,socket="$CHBOX_RUNDIR/store.sock" tag=repo,socket="$CHBOX_RUNDIR/repo.sock" \
+      tag=chbox,socket="$CHBOX_RUNDIR/guest.sock" \
     --disk path="$CHBOX_DISK",image_type=raw \
     --net tap=tap0 \
     --console tty \
@@ -70,6 +72,7 @@ cleanup() {
   [ -z "$disk" ] || rm -f "$disk"
 }
 trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
 
 # Throwaway, sparse write layer for /nix/store. Not in $XDG_RUNTIME_DIR: that's RAM.
 cachedir=${XDG_CACHE_HOME:-$HOME/.cache}/chbox
@@ -80,7 +83,7 @@ mkfs.ext4 -q -m 0 -L chbox-store -E lazy_itable_init=1,lazy_journal_init=1 "$dis
 
 # virtiofsd stays outside pasta's namespace: as namespace root it would try to
 # switch credentials. Its sockets are plain files, reachable from inside.
-virtiofsd \
+setpriv --pdeathsig KILL virtiofsd \
   --socket-path="$rundir/store.sock" \
   --shared-dir=/nix/store \
   --readonly \
@@ -89,7 +92,7 @@ virtiofsd \
   --log-level=error &
 
 # The guest user dev (1000:100) appears as the invoking host user, both ways.
-virtiofsd \
+setpriv --pdeathsig KILL virtiofsd \
   --socket-path="$rundir/repo.sock" \
   --shared-dir="$PWD" \
   --translate-uid="map:1000:$(id -u):1" \
@@ -97,7 +100,37 @@ virtiofsd \
   --sandbox=none \
   --log-level=error &
 
-for sock in store repo; do
+# Per-launch data for the guest (Claude token, git identity), read-only at
+# /run/chbox. Lives in $rundir, which only the invoking user can read.
+mkdir -m 700 "$rundir/guest"
+tokenfile=${XDG_CONFIG_HOME:-$HOME/.config}/chbox/claude-token
+token=${CLAUDE_CODE_OAUTH_TOKEN:-}
+if [ -z "$token" ] && [ -r "$tokenfile" ]; then
+  if [ -n "$(find "$tokenfile" -perm /077)" ]; then
+    echo "chbox: warning: $tokenfile is accessible by other users, chmod 600 it" >&2
+  fi
+  token=$(< "$tokenfile")
+fi
+if [ -n "$token" ]; then
+  (umask 077; printf '%s\n' "$token" > "$rundir/guest/claude-token")
+else
+  echo "chbox: no Claude token, Claude will ask you to log in. To skip that, run" >&2
+  echo "       'claude setup-token' on the host and save the token to $tokenfile" >&2
+  echo "       (or export CLAUDE_CODE_OAUTH_TOKEN)." >&2
+fi
+git config --get user.name > "$rundir/guest/git-name" || true
+git config --get user.email > "$rundir/guest/git-email" || true
+
+setpriv --pdeathsig KILL virtiofsd \
+  --socket-path="$rundir/guest.sock" \
+  --shared-dir="$rundir/guest" \
+  --readonly \
+  --translate-uid="map:1000:$(id -u):1" \
+  --translate-gid="map:100:$(id -g):1" \
+  --sandbox=none \
+  --log-level=error &
+
+for sock in store repo guest; do
   for _ in $(seq 100); do
     [ -S "$rundir/$sock.sock" ] && break
     sleep 0.05
@@ -114,8 +147,12 @@ host_addrs=$(ip -4 -o addr show | awk '{ sub("/.*", "", $4); print $4 }' | paste
 
 echo "chbox: booting VM ($CPUS CPUs, $MEMORY), shut down with: sudo poweroff"
 # IPv4 only; no port forwarding in either direction; nothing maps to the host.
+# Run as a job and wait: bash only handles signals (and so cleans up) between
+# commands, and a foreground child would block that. Without job control a
+# job's stdin would be /dev/null, so hand it the terminal explicitly.
 CHBOX_RUNDIR=$rundir CHBOX_DISK=$disk CHBOX_CMDLINE=$cmdline CHBOX_HOST_ADDRS=$host_addrs \
-  pasta --quiet --foreground --config-net -4 \
+  setpriv --pdeathsig KILL pasta --quiet --foreground --config-net -4 \
     --map-host-loopback none --dns-forward "$DNS_FWD" \
     -t none -u none -T none -U none \
-    -- "$0" --in-netns
+    -- "$0" --in-netns <&0 &
+wait $!
