@@ -91,8 +91,53 @@ setpriv --pdeathsig KILL virtiofsd \
   --sandbox=none \
   --log-level=error &
 
+# Git files that make the host run code later (hooks, config and the files it
+# includes) are read-only for the guest, even for root in it: the repo's
+# virtiofsd runs in a bubblewrap mount namespace where they are read-only bind
+# mounts. Their parent directories (e.g. .git) are bind mounts of themselves,
+# so they can't be renamed away and replaced either.
+bwrap_args=()
+declare -A bound
+protect() {
+  local path rest dir
+  path=$(realpath -m "$1")
+  case $path in "$PWD"/*) ;; *) return 0 ;; esac
+  [ -e "$path" ] || return 0
+  rest=${path#"$PWD"/} dir=$PWD
+  while [[ $rest == */* ]]; do
+    dir+=/${rest%%/*} rest=${rest#*/}
+    if [ -z "${bound[$dir]-}" ]; then
+      bwrap_args+=(--bind "$dir" "$dir")
+      bound[$dir]=1
+    fi
+  done
+  bwrap_args+=(--ro-bind "$path" "$path")
+}
+if [ -d .git ]; then
+  mkdir -p .git/hooks
+  protect .git/hooks
+  protect .git/config
+  protect .git/config.worktree
+  # Relative include paths are relative to the including file, i.e. .git/.
+  while read -r _ inc; do
+    case $inc in /*) ;; *) inc=.git/$inc ;; esac
+    protect "$inc"
+  done < <(git config --file .git/config --get-regexp '^include(if\..*)?\.path$' || true)
+  # A hooksPath inside the worktree (.githooks/, .husky/...) holds tracked hooks.
+  if hooks_path=$(git config --get core.hooksPath); then
+    case $hooks_path in /*) ;; *) hooks_path=$PWD/$hooks_path ;; esac
+    case $(realpath -m "$hooks_path") in "$PWD"/*) mkdir -p "$hooks_path" ;; esac
+    protect "$hooks_path"
+  fi
+  # Submodules keep their own hooks and config under .git/modules.
+  while IFS= read -r -d '' f; do
+    protect "$f"
+  done < <(find "$PWD/.git/modules" \( -type d -name hooks -prune -print0 \) \
+             -o \( -type f -name config -print0 \) 2>/dev/null || true)
+fi
+
 # The guest user dev (1000:100) appears as the invoking host user, both ways.
-setpriv --pdeathsig KILL virtiofsd \
+setpriv --pdeathsig KILL bwrap --dev-bind / / "${bwrap_args[@]}" --die-with-parent -- virtiofsd \
   --socket-path="$rundir/repo.sock" \
   --shared-dir="$PWD" \
   --translate-uid="map:1000:$(id -u):1" \
