@@ -1,5 +1,5 @@
 CPUS=${CHBOX_CPUS:-4}
-MEMORY=${CHBOX_MEMORY:-4G}
+MEMORY=${CHBOX_MEMORY:-8G}
 DISK_SIZE=${CHBOX_DISK_SIZE:-20G}
 
 # Guest network (guest.nix has the matching static config), on a tap device
