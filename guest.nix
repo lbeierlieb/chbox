@@ -43,8 +43,18 @@
     fsType = "virtiofs";
   };
 
+  # Static addressing on the tap that run.sh sets up; filtering happens there,
+  # outside the VM.
   networking.useDHCP = false;
+  networking.useNetworkd = true;
   networking.firewall.enable = false;
+  networking.nameservers = [ "192.0.2.53" ];
+  networking.enableIPv6 = false; # the namespace is IPv4-only (pasta -4)
+  systemd.network.networks."10-uplink" = {
+    matchConfig.Type = "ether";
+    address = [ "10.200.0.2/24" ];
+    gateway = [ "10.200.0.1" ];
+  };
 
   users.mutableUsers = false;
   users.allowNoPasswordLogin = true; # autologin only

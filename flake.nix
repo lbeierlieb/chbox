@@ -19,7 +19,9 @@
     {
       packages.${system}.default = pkgs.writeShellApplication {
         name = "chbox";
-        runtimeInputs = with pkgs; [ cloud-hypervisor virtiofsd coreutils e2fsprogs ];
+        runtimeInputs = with pkgs; [
+          cloud-hypervisor virtiofsd coreutils gawk e2fsprogs passt iproute2 nftables
+        ];
         text = ''
           KERNEL=${cfg.boot.kernelPackages.kernel.dev}/vmlinux
           INITRD=${cfg.system.build.initialRamdisk}/${cfg.system.boot.loader.initrdFile}
