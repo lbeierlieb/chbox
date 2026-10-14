@@ -24,6 +24,10 @@
     options = [ "ro" ];
     neededForBoot = true;
   };
+  fileSystems."/repo" = {
+    device = "repo";
+    fsType = "virtiofs";
+  };
 
   networking.useDHCP = false;
   networking.firewall.enable = false;
@@ -32,6 +36,7 @@
   users.allowNoPasswordLogin = true; # autologin only
   users.users.dev = {
     isNormalUser = true;
+    uid = 1000; # mapped to the host user by virtiofsd, see run.sh
     extraGroups = [ "wheel" ];
   };
   security.sudo.wheelNeedsPassword = false;
@@ -42,6 +47,8 @@
   # The host passes its $TERM through, so ship terminfo for common terminals.
   environment.enableAllTerminfo = true;
 
+  environment.systemPackages = [ pkgs.git ];
+
   programs.tmux = {
     enable = true;
     terminal = "tmux-256color";
@@ -49,7 +56,7 @@
   # Leaving tmux ends the login; getty logs in again. `sudo poweroff` exits the VM.
   programs.bash.loginShellInit = ''
     if [ -z "''${TMUX-}" ] && [ "$(tty)" = /dev/hvc0 ]; then
-      exec tmux new-session -A -s main
+      exec tmux new-session -A -s main -c /repo
     fi
   '';
 }

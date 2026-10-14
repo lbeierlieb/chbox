@@ -17,9 +17,20 @@ virtiofsd \
   --sandbox=none \
   --log-level=error &
 
-for _ in $(seq 100); do
-  [ -S "$rundir/store.sock" ] && break
-  sleep 0.05
+# The guest user dev (1000:100) appears as the invoking host user, both ways.
+virtiofsd \
+  --socket-path="$rundir/repo.sock" \
+  --shared-dir="$PWD" \
+  --translate-uid="map:1000:$(id -u):1" \
+  --translate-gid="map:100:$(id -g):1" \
+  --sandbox=none \
+  --log-level=error &
+
+for sock in store repo; do
+  for _ in $(seq 100); do
+    [ -S "$rundir/$sock.sock" ] && break
+    sleep 0.05
+  done
 done
 
 # Tell the guest's getty on hvc0 which terminal the host is rendering with.
@@ -34,6 +45,6 @@ cloud-hypervisor \
   --cmdline "$cmdline" \
   --cpus boot="$CPUS" \
   --memory size="$MEMORY",shared=on \
-  --fs tag=nixstore,socket="$rundir/store.sock" \
+  --fs tag=nixstore,socket="$rundir/store.sock" tag=repo,socket="$rundir/repo.sock" \
   --console tty \
   --serial off
