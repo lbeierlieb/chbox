@@ -54,8 +54,8 @@ NFT
     --cmdline "$CHBOX_CMDLINE" \
     --cpus boot="$CPUS" \
     --memory size="$MEMORY",shared=on \
-    --fs tag=nixstore,socket="$CHBOX_RUNDIR/store.sock" tag=repo,socket="$CHBOX_RUNDIR/repo.sock" \
-      tag=chbox,socket="$CHBOX_RUNDIR/guest.sock" \
+    --fs tag=nixstore,socket="$CHBOX_RUNDIR/sock/store.sock" tag=repo,socket="$CHBOX_RUNDIR/sock/repo.sock" \
+      tag=chbox,socket="$CHBOX_RUNDIR/sock/guest.sock" \
     --disk path="$CHBOX_DISK",image_type=raw \
     --net tap=tap0 \
     --console tty \
@@ -83,11 +83,25 @@ mkfs.ext4 -q -m 0 -L chbox-store -E lazy_itable_init=1,lazy_journal_init=1 "$dis
 
 # virtiofsd stays outside pasta's namespace: as namespace root it would try to
 # switch credentials. Its sockets are plain files, reachable from inside.
-setpriv --pdeathsig KILL virtiofsd \
-  --socket-path="$rundir/store.sock" \
+# Without root it can't use its own sandbox, so each one runs in bubblewrap and
+# only sees what it serves, plus /nix/store (its own program), /proc (it reopens
+# files via /proc/self/fd) and the socket directory.
+mkdir "$rundir/sock"
+jail() {
+  setpriv --pdeathsig KILL bwrap --unshare-all --die-with-parent --new-session \
+    --ro-bind /nix/store /nix/store --proc /proc --dev /dev \
+    --bind "$rundir/sock" "$rundir/sock" "$@"
+}
+
+# In the jail's user namespace root-owned files appear as nobody (65534); the
+# guest should see them as root again.
+jail -- virtiofsd \
+  --socket-path="$rundir/sock/store.sock" \
   --shared-dir=/nix/store \
   --readonly \
   --cache=always \
+  --translate-uid=map:0:65534:1 \
+  --translate-gid=map:0:65534:1 \
   --sandbox=none \
   --log-level=error &
 
@@ -137,8 +151,8 @@ if [ -d .git ]; then
 fi
 
 # The guest user dev (1000:100) appears as the invoking host user, both ways.
-setpriv --pdeathsig KILL bwrap --dev-bind / / "${bwrap_args[@]}" --die-with-parent -- virtiofsd \
-  --socket-path="$rundir/repo.sock" \
+jail --bind "$PWD" "$PWD" "${bwrap_args[@]}" -- virtiofsd \
+  --socket-path="$rundir/sock/repo.sock" \
   --shared-dir="$PWD" \
   --translate-uid="map:1000:$(id -u):1" \
   --translate-gid="map:100:$(id -g):1" \
@@ -180,8 +194,8 @@ fi
 git config --get user.name > "$rundir/guest/git-name" || true
 git config --get user.email > "$rundir/guest/git-email" || true
 
-setpriv --pdeathsig KILL virtiofsd \
-  --socket-path="$rundir/guest.sock" \
+jail --ro-bind "$rundir/guest" "$rundir/guest" -- virtiofsd \
+  --socket-path="$rundir/sock/guest.sock" \
   --shared-dir="$rundir/guest" \
   --readonly \
   --translate-uid="map:1000:$(id -u):1" \
@@ -191,7 +205,7 @@ setpriv --pdeathsig KILL virtiofsd \
 
 for sock in store repo guest; do
   for _ in $(seq 100); do
-    [ -S "$rundir/$sock.sock" ] && break
+    [ -S "$rundir/sock/$sock.sock" ] && break
     sleep 0.05
   done
 done
