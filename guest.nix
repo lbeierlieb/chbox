@@ -180,4 +180,19 @@ in
       fi
     '';
   };
+
+  # virtiofsd holds a host fd per inode the guest caches; make the guest
+  # let go of them regularly so the count doesn't creep up to the limit.
+  boot.kernel.sysctl."vm.vfs_cache_pressure" = 200;
+  systemd.services.chbox-drop-inodes = {
+    serviceConfig.Type = "oneshot";
+    script = "echo 2 > /proc/sys/vm/drop_caches";
+  };
+  systemd.timers.chbox-drop-inodes = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "5min";
+      OnUnitActiveSec = "5min";
+    };
+  };
 }
