@@ -18,7 +18,6 @@ in
 
   # Direct kernel boot: no bootloader, no disk.
   boot.loader.grub.enable = false;
-  boot.initrd.systemd.enable = true;
   boot.initrd.availableKernelModules = [ "virtio_pci" "virtiofs" "virtio_blk" "ext4" "overlay" ];
   boot.initrd.kernelModules = [ "virtio_console" ];
   boot.kernelParams = [ "console=hvc0" "quiet" "udev.log_level=3" "systemd.show_status=true" ];

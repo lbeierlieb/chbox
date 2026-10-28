@@ -52,7 +52,7 @@ NFT
     --kernel "$KERNEL" \
     --initramfs "$INITRD" \
     --cmdline "$CHBOX_CMDLINE" \
-    --cpus boot="$CPUS" \
+    --cpus boot="$CPUS",nested=on \
     --memory size="$MEMORY",shared=on \
     --fs tag=nixstore,socket="$CHBOX_RUNDIR/sock/store.sock" tag=repo,socket="$CHBOX_RUNDIR/sock/repo.sock" \
       tag=chbox,socket="$CHBOX_RUNDIR/sock/guest.sock" \
