@@ -3,7 +3,8 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-  outputs = { self, nixpkgs }:
+  outputs =
+    { self, nixpkgs }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -19,19 +20,34 @@
     {
       packages.${system}.default = pkgs.writeShellApplication {
         name = "chbox";
-        runtimeInputs = with pkgs; [
-          cloud-hypervisor virtiofsd bubblewrap coreutils util-linux findutils gawk git e2fsprogs passt iproute2 nftables
-        ] ++ [
-          # For `claude setup-token` on first run. The guest's pkgs allows this
-          # unfree package, and it is the same store path as in the VM.
-          guest.pkgs.claude-code
-        ];
+        runtimeInputs =
+          with pkgs;
+          [
+            cloud-hypervisor
+            virtiofsd
+            bubblewrap
+            coreutils
+            util-linux
+            findutils
+            gawk
+            git
+            e2fsprogs
+            passt
+            iproute2
+            nftables
+          ]
+          ++ [
+            # For `claude setup-token` on first run. The guest's pkgs allows this
+            # unfree package, and it is the same store path as in the VM.
+            guest.pkgs.claude-code
+          ];
         text = ''
           KERNEL=${cfg.boot.kernelPackages.kernel.dev}/vmlinux
           INITRD=${cfg.system.build.initialRamdisk}/${cfg.system.boot.loader.initrdFile}
           TOPLEVEL=${cfg.system.build.toplevel}
           REGISTRATION=${closure}/registration
-        '' + builtins.readFile ./run.sh;
+        ''
+        + builtins.readFile ./run.sh;
       };
     };
 }

@@ -1,14 +1,24 @@
-{ config, lib, pkgs, modulesPath, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  modulesPath,
+  ...
+}:
 let
   # Home is a tmpfs, so these are copied fresh on every boot.
-  claudeJson = pkgs.writeText "claude.json" (builtins.toJSON {
-    hasCompletedOnboarding = true;
-    bypassPermissionsModeAccepted = true;
-    projects."/repo".hasTrustDialogAccepted = true;
-  });
-  claudeSettings = pkgs.writeText "claude-settings.json" (builtins.toJSON {
-    skipDangerousModePermissionPrompt = true;
-  });
+  claudeJson = pkgs.writeText "claude.json" (
+    builtins.toJSON {
+      hasCompletedOnboarding = true;
+      bypassPermissionsModeAccepted = true;
+      projects."/repo".hasTrustDialogAccepted = true;
+    }
+  );
+  claudeSettings = pkgs.writeText "claude-settings.json" (
+    builtins.toJSON {
+      skipDangerousModePermissionPrompt = true;
+    }
+  );
 in
 {
   imports = [ (modulesPath + "/profiles/minimal.nix") ];
@@ -18,9 +28,20 @@ in
 
   # Direct kernel boot: no bootloader, no disk.
   boot.loader.grub.enable = false;
-  boot.initrd.availableKernelModules = [ "virtio_pci" "virtiofs" "virtio_blk" "ext4" "overlay" ];
+  boot.initrd.availableKernelModules = [
+    "virtio_pci"
+    "virtiofs"
+    "virtio_blk"
+    "ext4"
+    "overlay"
+  ];
   boot.initrd.kernelModules = [ "virtio_console" ];
-  boot.kernelParams = [ "console=hvc0" "quiet" "udev.log_level=3" "systemd.show_status=true" ];
+  boot.kernelParams = [
+    "console=hvc0"
+    "quiet"
+    "udev.log_level=3"
+    "systemd.show_status=true"
+  ];
   boot.consoleLogLevel = 3;
 
   fileSystems."/" = {
@@ -88,7 +109,10 @@ in
   environment.enableAllTerminfo = true;
 
   nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "claude-code";
-  environment.systemPackages = [ pkgs.git pkgs.claude-code ];
+  environment.systemPackages = [
+    pkgs.git
+    pkgs.claude-code
+  ];
   # The store is read-only and the VM throwaway: updating in place can't work.
   environment.variables.DISABLE_AUTOUPDATER = "1";
 
@@ -121,7 +145,10 @@ in
   '';
 
   nix.settings = {
-    experimental-features = [ "nix-command" "flakes" ];
+    experimental-features = [
+      "nix-command"
+      "flakes"
+    ];
     trusted-users = [ "dev" ];
     # nixosSystem pins nixpkgs in /etc/nix/registry.json; skip the global download.
     flake-registry = "";
@@ -135,7 +162,12 @@ in
     # boot, before anything (including nix-daemon) can use the store.
     unitConfig.DefaultDependencies = false;
     wantedBy = [ "sysinit.target" ];
-    before = [ "sysinit.target" "shutdown.target" "nix-daemon.socket" "nix-daemon.service" ];
+    before = [
+      "sysinit.target"
+      "shutdown.target"
+      "nix-daemon.socket"
+      "nix-daemon.service"
+    ];
     after = [ "local-fs.target" ];
     conflicts = [ "shutdown.target" ];
     serviceConfig = {
